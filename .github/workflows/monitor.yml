@@ -1,0 +1,43 @@
+name: EudraGMDP India Monitor
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run EudraGMDP scraper
+        env:
+          TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
+          TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
+          TWILIO_FROM_NUMBER: ${{ secrets.TWILIO_FROM_NUMBER }}
+          ALERT_TO_NUMBER: ${{ secrets.ALERT_TO_NUMBER }}
+        run: python scraper.py
+
+      - name: Save updated state
+        run: |
+          git config --global user.name "EudraGMDP Bot"
+          git config --global user.email "actions@github.com"
+          git add data/state.json
+          git diff --cached --quiet || git commit -m "Update monitor state"
+          git push
