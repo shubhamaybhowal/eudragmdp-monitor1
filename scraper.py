@@ -470,27 +470,22 @@ def format_digest_message(new_certs: list, new_nc: list) -> str:
 
 def run():
     """Main execution function — scrape, compare, alert."""
-
     log.info("=" * 60)
     log.info("EudraGMDP India GMP Monitor — Starting scan")
-    log.info(
-        f"Run time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
-    )
+    log.info(f"Run time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}")
     log.info("=" * 60)
 
-    # ── LOAD PREVIOUS STATE ──
+    # Load previous state
     state = load_state()
-
     seen_certs = set(state.get("seen_certificates", []))
-    seen_nc = set(state.get("seen_noncompliance", []))
+    seen_nc    = set(state.get("seen_noncompliance", []))
 
     # ── SCRAPE ──
     all_certs = scrape_certificates()
-    all_nc = scrape_non_compliance()
+    all_nc    = scrape_non_compliance()
 
     # ── FIRST RUN CHECK ──
-    # On the first run, save all existing records as the baseline
-    # without sending alerts.
+    # On the first run, create a baseline without sending alerts.
     is_first_run = (
         not seen_certs
         and not seen_nc
@@ -498,115 +493,61 @@ def run():
     )
 
     if is_first_run:
-        log.info(
-            "FIRST RUN: Creating baseline — no alerts will be sent"
-        )
-
+        log.info("FIRST RUN: Creating baseline — no alerts will be sent")
         new_certs = []
         new_nc = []
-
     else:
         # ── FIND NEW ONES ──
-        new_certs = [
-            c for c in all_certs
-            if c["id"] not in seen_certs
-        ]
-
-        new_nc = [
-            c for c in all_nc
-            if c["id"] not in seen_nc
-        ]
+        new_certs = [c for c in all_certs if c["id"] not in seen_certs]
+        new_nc = [c for c in all_nc if c["id"] not in seen_nc]
 
     log.info(f"New certificates found: {len(new_certs)}")
     log.info(f"New non-compliance reports: {len(new_nc)}")
 
     # ── SEND ALERTS ──
     if new_certs or new_nc:
-
         # Watchlist items get individual WhatsApp messages
-        watchlist_certs = [
-            c for c in (new_certs + new_nc)
-            if c["is_watchlist"]
-        ]
-
+        watchlist_certs = [c for c in (new_certs + new_nc) if c["is_watchlist"]]
         for cert in watchlist_certs:
             msg = format_whatsapp_alert(cert)
+            send_whatsapp(msg, is_urgent=True)
+            time.sleep(2)  # Avoid rate limiting
 
-            send_whatsapp(
-                msg,
-                is_urgent=True
-            )
-
-            time.sleep(2)
-
-        # Non-compliance reports get individual alerts
-        non_watchlist_nc = [
-            c for c in new_nc
-            if not c["is_watchlist"]
-        ]
-
+        # Non-compliance reports get individual alerts even if not on watchlist
+        non_watchlist_nc = [c for c in new_nc if not c["is_watchlist"]]
         for cert in non_watchlist_nc:
-            msg = format_whatsapp_alert(
-                cert
-            )
-
-            send_whatsapp(
-                msg,
-                is_urgent=True
-            )
-
+            msg = format_whatsapp_alert(cert)
+            send_whatsapp(msg, is_urgent=True)
             time.sleep(2)
 
-        # Send digest
+        # Send a digest for all new items (summary)
         total = len(new_certs) + len(new_nc)
-
         if total > 0:
+            digest = format_digest_message(new_certs, new_nc)
 
-            digest = format_digest_message(
-                new_certs,
-                new_nc
+            # Email the full digest always
+            email_body = digest.replace("*", "").replace("━", "-")
+            send_email(
+                subject=f"[EudraGMDP] {total} new India GMP alert(s) — {datetime.utcnow().strftime('%d %b %Y')}",
+                body=email_body
             )
 
-            # WhatsApp digest only if no individual alerts
-            if (
-                not watchlist_certs
-                and not non_watchlist_nc
-            ):
+            # WhatsApp digest only if no individual alerts were sent
+            if not watchlist_certs and not non_watchlist_nc:
                 send_whatsapp(digest)
 
     else:
-        log.info(
-            "No new certificates — no alerts sent"
-        )
+        log.info("No new certificates — no alerts sent")
 
     # ── UPDATE STATE ──
-    state["seen_certificates"] = list(
-        seen_certs |
-        {c["id"] for c in all_certs}
-    )
-
-    state["seen_noncompliance"] = list(
-        seen_nc |
-        {c["id"] for c in all_nc}
-    )
-
-    state["last_run"] = (
-        datetime.utcnow().isoformat()
-    )
-
-    state["total_india_certs"] = len(
-        all_certs
-    )
-
+    state["seen_certificates"]  = list(seen_certs | {c["id"] for c in all_certs})
+    state["seen_noncompliance"] = list(seen_nc    | {c["id"] for c in all_nc})
+    state["last_run"]           = datetime.utcnow().isoformat()
+    state["total_india_certs"]  = len(all_certs)
     save_state(state)
 
     log.info("=" * 60)
-
-    log.info(
-        f"Scan complete. Total India certs on record: "
-        f"{len(state['seen_certificates'])}"
-    )
-
+    log.info(f"Scan complete. Total India certs on record: {len(state['seen_certificates'])}")
     log.info("=" * 60)
 
     return {
@@ -614,6 +555,7 @@ def run():
         "new_non_compliance": len(new_nc),
         "total_india_certs": len(all_certs),
     }
+
 
 if __name__ == "__main__":
     result = run()
