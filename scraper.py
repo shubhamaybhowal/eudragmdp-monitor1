@@ -484,9 +484,24 @@ def run():
     all_certs = scrape_certificates()
     all_nc    = scrape_non_compliance()
 
+    # ── FIRST RUN CHECK ──
+# If this is the first run, save all current records as the baseline
+# without sending alerts.
+
+is_first_run = (
+    not seen_certs
+    and not seen_nc
+    and state.get("last_run") is None
+)
+
+if is_first_run:
+    log.info("FIRST RUN: Creating baseline — no alerts will be sent")
+    new_certs = []
+    new_nc = []
+else:
     # ── FIND NEW ONES ──
     new_certs = [c for c in all_certs if c["id"] not in seen_certs]
-    new_nc    = [c for c in all_nc    if c["id"] not in seen_nc]
+    new_nc = [c for c in all_nc if c["id"] not in seen_nc]
 
     log.info(f"New certificates found: {len(new_certs)}")
     log.info(f"New non-compliance reports: {len(new_nc)}")
